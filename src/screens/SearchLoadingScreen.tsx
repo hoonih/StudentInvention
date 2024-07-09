@@ -128,7 +128,7 @@ const SearchLoadingScreen = () => {
             setStepCount(Number(rawStepData));
           }
         });
-        navigation.navigate('BluetoothSuccessScreen', { device: { device } });
+        navigation.navigate('BluetoothSuccessScreen', { device });
       })
       .catch((error) => {
         console.log(error);

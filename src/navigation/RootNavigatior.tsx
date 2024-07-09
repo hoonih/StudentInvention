@@ -17,7 +17,10 @@ const Stack = createStackNavigator<RootStackParamList>();
 const AppNavigator = () => {
   return (
     <NavigationContainer>
-      <Stack.Navigator initialRouteName="SearchLoadingScreen">
+      <Stack.Navigator 
+        initialRouteName="SearchLoadingScreen"
+        screenOptions={{ headerShown: false }}
+      >
         <Stack.Screen name="SearchLoadingScreen" component={SearchLoadingScreen} />
         <Stack.Screen name="BluetoothSuccessScreen" 
             component={BluetoothSuccessScreen}/>
