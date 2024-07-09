@@ -4,115 +4,170 @@
  *
  * @format
  */
-
-import React from 'react';
+import React, { useState, useEffect, useRef } from "react";
 import type {PropsWithChildren} from 'react';
 import {
-  SafeAreaView,
-  ScrollView,
-  StatusBar,
   StyleSheet,
   Text,
-  useColorScheme,
   View,
-} from 'react-native';
+  ImageBackground,
+  SafeAreaView,
+  PermissionsAndroid,
+} from "react-native";
 
-import {
-  Colors,
-  DebugInstructions,
-  Header,
-  LearnMoreLinks,
-  ReloadInstructions,
-} from 'react-native/Libraries/NewAppScreen';
+import { BleManager, Device, Characteristic, BleError } from "react-native-ble-plx";
 
-type SectionProps = PropsWithChildren<{
-  title: string;
-}>;
+import styled, { useTheme } from 'styled-components/native';
 
-function Section({children, title}: SectionProps): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
-  return (
-    <View style={styles.sectionContainer}>
-      <Text
-        style={[
-          styles.sectionTitle,
-          {
-            color: isDarkMode ? Colors.white : Colors.black,
-          },
-        ]}>
-        {title}
-      </Text>
-      <Text
-        style={[
-          styles.sectionDescription,
-          {
-            color: isDarkMode ? Colors.light : Colors.dark,
-          },
-        ]}>
-        {children}
-      </Text>
-    </View>
-  );
+
+// Android Bluetooth Permission
+async function requestLocationPermission() {
+  try {
+    const granted = await PermissionsAndroid.request(
+      PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
+      {
+        title: "Location permission for bluetooth scanning",
+        message:
+          "Grant location permission to allow the app to scan for Bluetooth devices",
+        buttonNeutral: "Ask Me Later",
+        buttonNegative: "Cancel",
+        buttonPositive: "OK",
+      }
+    );
+    if (granted === PermissionsAndroid.RESULTS.GRANTED) {
+      console.log("Location permission for bluetooth scanning granted");
+    } else {
+      console.log("Location permission for bluetooth scanning denied");
+    }
+  } catch (err) {
+    console.warn(err);
+  }
 }
 
-function App(): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
 
-  const backgroundStyle = {
-    backgroundColor: isDarkMode ? Colors.darker : Colors.lighter,
+requestLocationPermission();
+
+const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+const STEP_DATA_CHAR_UUID = "beefcafe-36e1-4688-b7f5-00000000000b";
+
+const bleManager = new BleManager();
+
+function App(): React.JSX.Element {
+  
+  const [deviceID, setDeviceID] = useState<string | null>(null);
+  const [stepCount, setStepCount] = useState<number>(0);
+  const [stepDataChar, setStepDataChar] = useState<Characteristic | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<string>("Searching...");
+
+  const progress = (stepCount / 1000) * 100;
+
+  const deviceRef = useRef<Device | null>(null);
+
+  const searchAndConnectToDevice = (): void => {
+    bleManager.startDeviceScan(null, null, (error: BleError | null, device: Device | null) => {
+      if (error) {
+        console.error(error);
+        setConnectionStatus("Error searching for devices");
+        return;
+      }
+      if (device && device.name === "Childdev") {
+        bleManager.stopDeviceScan();
+        setConnectionStatus("Connecting...");
+        connectToDevice(device);
+      }
+    });
   };
 
+  useEffect(() => {
+    searchAndConnectToDevice();
+  }, []);
+
+  const connectToDevice = (device: Device): Promise<void> => {
+    return device
+      .connect()
+      .then((device) => {
+        setDeviceID(device.id);
+        setConnectionStatus("Connected");
+        deviceRef.current = device;
+        return device.discoverAllServicesAndCharacteristics();
+      })
+      .then((device) => {
+        return device.services();
+      })
+      .then((services) => {
+        const service = services.find((service) => service.uuid === SERVICE_UUID);
+        if (!service) {
+          throw new Error("Service not found");
+        }
+        return service.characteristics();
+      })
+      .then((characteristics) => {
+        const stepDataCharacteristic = characteristics.find(
+          (char) => char.uuid === STEP_DATA_CHAR_UUID
+        );
+        if (!stepDataCharacteristic) {
+          throw new Error("Step Data Characteristic not found");
+        }
+        setStepDataChar(stepDataCharacteristic);
+        stepDataCharacteristic.monitor((error, char) => {
+          if (error) {
+            console.error(error);
+            return;
+          }
+          if (char?.value) {
+            const rawStepData = atob(char.value);
+            console.log("Received step data:", rawStepData);
+            setStepCount(Number(rawStepData));
+          }
+        });
+      })
+      .catch((error) => {
+        console.log(error);
+        setConnectionStatus("Error in Connection");
+      });
+  };
+
+  useEffect(() => {
+    const subscription = bleManager.onDeviceDisconnected(
+      deviceID,
+      (error, device) => {
+        if (error) {
+          console.log("Disconnected with error:", error);
+        }
+        setConnectionStatus("Disconnected");
+        console.log("Disconnected device");
+        setStepCount(0); // Reset the step count
+        if (deviceRef.current) {
+          setConnectionStatus("Reconnecting...");
+          connectToDevice(deviceRef.current)
+            .then(() => setConnectionStatus("Connected"))
+            .catch((error) => {
+              console.log("Reconnection failed: ", error);
+              setConnectionStatus("Reconnection failed");
+            });
+        }
+      }
+    );
+    return () => subscription.remove();
+  }, [deviceID]);
+
+
   return (
-    <SafeAreaView style={backgroundStyle}>
-      <StatusBar
-        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
-        backgroundColor={backgroundStyle.backgroundColor}
-      />
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        style={backgroundStyle}>
-        <Header />
-        <View
-          style={{
-            backgroundColor: isDarkMode ? Colors.black : Colors.white,
-          }}>
-          <Section title="Step One">
-            Edit <Text style={styles.highlight}>App.tsx</Text> to change this
-            screen and then come back to see your edits.
-          </Section>
-          <Section title="See Your Changes">
-            <ReloadInstructions />
-          </Section>
-          <Section title="Debug">
-            <DebugInstructions />
-          </Section>
-          <Section title="Learn More">
-            Read the docs to discover what to do next:
-          </Section>
-          <LearnMoreLinks />
-        </View>
-      </ScrollView>
+    <SafeAreaView>
+      <Back>
+      <Text>{connectionStatus}</Text>
+
+      </Back>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  sectionContainer: {
-    marginTop: 32,
-    paddingHorizontal: 24,
-  },
-  sectionTitle: {
-    fontSize: 24,
-    fontWeight: '600',
-  },
-  sectionDescription: {
-    marginTop: 8,
-    fontSize: 18,
-    fontWeight: '400',
-  },
-  highlight: {
-    fontWeight: '700',
-  },
-});
 
 export default App;
+
+const Back = styled.View`
+  height: 100%;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+`
